@@ -1,0 +1,253 @@
+fmod VID is
+  pr NAT .
+  sort Vid .
+  op dv : Nat -> Vid [ctor] .
+  op v : Nat -> Vid [ctor] .
+endfm
+
+fmod LANE is
+  sort Lane .
+  ops through nonThrough : -> Lane [ctor] .
+endfm
+
+fmod MODE is
+  sort Mode .
+  ops prioritized fair : -> Mode [ctor] .
+endfm
+
+fmod QUEUE {D :: TRIV} is
+  sort Queue{D} .
+  subsort D$Elt < Queue{D} .
+  op empq : -> Queue{D} [ctor] .
+  op _;_ : Queue{D} Queue{D} -> Queue{D} [ctor assoc id: empq] .
+  op topQ : Queue{D} -> D$Elt .
+  eq topQ(X:D$Elt ; Qu:Queue{D}) = X:D$Elt .
+endfm
+
+view Vid from TRIV to VID is
+  sort Elt to Vid .
+endv
+
+fmod GSTATUS is
+  sort GStat .
+  ops nFin fin : -> GStat [ctor] .
+endfm
+
+fmod VSTATUS is
+  sort VStat .
+  ops running approaching stopped crossing crossed : -> VStat [ctor] .
+  ops unspace space yield : -> VStat [ctor] .
+endfm
+
+fmod VID-QUEUE is
+  pr QUEUE{Vid} .
+  pr NAT .
+  op # : Queue{Vid} Nat Nat -> Nat .
+  op isCongested : Queue{Vid} -> Bool .
+  var V : Vid .
+  var Q : Queue{Vid} .
+  vars X Y I : Nat .
+  eq #(empq,X,Y) = X .
+  eq #((V ; Q),X,0) = X .
+  eq #((dv(I) ; Q),X,s(Y)) = #(Q,X,Y) .
+  eq #((v(I) ; Q),X,s(Y)) = #(Q,s(X),Y) .
+  eq isCongested(Q) = (#(Q,0,5) >= 3) .
+endfm
+
+fmod OCOMP is
+  pr VID .
+  pr LANE .
+  pr MODE .
+  pr GSTATUS .
+  pr VSTATUS .
+  pr VID-QUEUE .
+  sort OComp .
+  op (gstat:_) : GStat -> OComp [ctor] .
+  op (#ucvs:_) : Nat -> OComp [ctor] .
+  --- #ucvs stands for the number of uncrossing vehicles.
+  op (crossing?:_) : Bool -> OComp [ctor] .
+  op (mode:_) : Mode -> OComp [ctor] .
+  op (turn:_) : Lane -> OComp [ctor] .
+  op (lane[_]:_) : Lane Queue{Vid} -> OComp [ctor] .
+  op (v[_]:_,_) : Vid Lane VStat -> OComp [ctor] .
+endfm
+
+fmod SOUP {D :: TRIV} is
+  sort Soup{D} .
+  subsort D$Elt < Soup{D} .
+  op empty : -> Soup{D} [ctor] .
+  op _ _ : Soup{D} Soup{D} -> Soup{D} [ctor assoc comm id: empty] .
+  op _\in_ : D$Elt Soup{D} -> Bool .
+  var E : D$Elt .
+  var S : Soup{D} .
+  eq E \in empty = false .
+  eq E \in E S = true .
+  eq E \in S = false [owise] .
+endfm
+
+view OComp from TRIV to OCOMP is
+  sort Elt to OComp .
+endv
+
+fmod OCOMP-SOUP is
+  pr SOUP{OComp} .
+endfm
+
+fmod CONFIG is
+  pr OCOMP-SOUP .
+  sorts Config .
+  op {_} : Soup{OComp} -> Config [ctor] .
+  op init : -> Config .
+  eq init = {(gstat: nFin) (#ucvs: 6) 
+                     (crossing?: false) (mode: prioritized) (turn: through)
+                     (lane[through]: empq) (lane[nonThrough]: empq) 
+                     (v[v(0)]: through,running) (v[v(1)]: through,running) 
+                     (v[v(2)]: through,running) (v[v(3)]: through,running) 
+                     (v[v(4)]: nonThrough,running) (v[v(5)]: nonThrough,running) 
+                     (v[dv(0)]: through,unspace) (v[dv(1)]: through,unspace)} .
+endfm
+
+mod AVMP is
+  inc CONFIG .
+  vars I J N : Nat .
+  var MD : Mode .
+  vars L1 L2 : Lane .
+  var VS : VStat .
+  vars TQ NQ : Queue{Vid} .
+  var OCs : Soup{OComp} .
+  --- house keeping
+  rl [loop] : {(gstat: fin) OCs} => {(gstat: fin) OCs} .  
+  rl [fin] : {(gstat: nFin) (#ucvs: 0) OCs} => {(gstat: fin) (#ucvs: 0) OCs} .
+  --- approach
+  rl [approach-T] : {(v[v(I)]: through,running) (lane[through]: TQ) (mode: MD) OCs}
+   => {(v[v(I)]: through,approaching) (lane[through]: (TQ ; v(I))) 
+           (mode: (if isCongested(TQ ; v(I)) then fair else MD fi)) OCs} .
+  rl [approach-N] : {(v[v(I)]: nonThrough,running) (lane[nonThrough]: NQ) OCs}
+   => {(v[v(I)]: nonThrough,approaching) (lane[nonThrough]: (NQ ; v(I))) OCs} .
+  --- enter space
+  rl [enter-S] : {(v[dv(I)]: through,unspace) (lane[through]: TQ) OCs}
+   => {(v[dv(I)]: through,space) (lane[through]: (TQ ; dv(I))) OCs} .
+  --- stop
+  rl [stop-crossing-T] : 
+  {(v[v(I)]: through,approaching) (lane[through]: (v(I) ; TQ)) (crossing?: true) OCs}
+   => {(v[v(I)]: through,stopped) (lane[through]: (v(I) ; TQ)) (crossing?: true) OCs} .
+  rl [stop-crossing-N] : 
+  {(v[v(I)]: nonThrough,approaching) (lane[nonThrough]: (v(I) ; NQ)) (crossing?: true) OCs}
+   => {(v[v(I)]: nonThrough,stopped) (lane[nonThrough]: (v(I) ; NQ)) (crossing?: true) OCs} .
+  rl [stop-fairN-T] : 
+  {(v[v(I)]: through,approaching) (lane[through]: (v(I) ; TQ)) (mode: fair) (turn: nonThrough) OCs}
+   => {(v[v(I)]: through,stopped) (lane[through]: (v(I) ; TQ)) (mode: fair) (turn: nonThrough) OCs} .
+  rl [stop-fairT-N] : 
+  {(v[v(I)]: nonThrough,approaching) (lane[nonThrough]: (v(I) ; TQ)) (mode: fair) (turn: through) OCs}
+   => {(v[v(I)]: nonThrough,stopped) (lane[nonThrough]: (v(I) ; TQ)) (mode: fair) (turn: through) OCs} .
+  rl [stop-prio-N] : 
+  {(v[v(I)]: nonThrough,approaching) (lane[nonThrough]: (v(I) ; TQ)) (mode: prioritized) OCs}
+   => {(v[v(I)]: nonThrough,stopped) (lane[nonThrough]: (v(I) ; TQ)) (mode: prioritized) OCs} .
+  --- enter
+  rl [enter-prio-T] : 
+  {(v[v(I)]: through,VS) (lane[through]: (v(I) ; TQ)) (mode: prioritized) (crossing?: false) OCs}
+   => {(v[v(I)]: through,crossing) (lane[through]: (v(I) ; TQ)) (mode: prioritized) (crossing?: true) OCs} .
+  rl [enter-fairT-T] : 
+  {(v[v(I)]: through,VS) (lane[through]: (v(I) ; TQ)) (mode: fair) (turn: through) (crossing?: false) OCs}
+   => {(v[v(I)]: through,crossing) (lane[through]: (v(I) ; TQ)) (mode: fair) (turn: nonThrough) (crossing?: true) OCs} .
+  rl [enter-fairN-T] : 
+  {(v[v(I)]: through,stopped) (lane[through]: (v(I) ; TQ)) (lane[nonThrough]: empq) 
+    (mode: fair) (turn: nonThrough) (crossing?: false) OCs}
+   => {(v[v(I)]: through,crossing) (lane[through]: (v(I) ; TQ)) (lane[nonThrough]: empq)
+            (mode: fair) (turn: nonThrough) (crossing?: true) OCs} .
+  rl [enter-prio-empq-N] : 
+  {(v[v(I)]: nonThrough,stopped) (lane[nonThrough]: (v(I) ; NQ)) (lane[through]: empq) 
+    (mode: prioritized) (crossing?: false) OCs}
+   => {(v[v(I)]: nonThrough,crossing) (lane[nonThrough]: (v(I) ; NQ)) (lane[through]: empq) 
+            (mode: prioritized) (crossing?: true) OCs} .
+  rl [enter-prio-space-N] : 
+  {(v[v(I)]: nonThrough,stopped) (lane[nonThrough]: (v(I) ; NQ)) 
+    (v[dv(J)]: through,space) (lane[through]: (dv(J) ; TQ)) (mode: prioritized) (crossing?: false) OCs}
+   => {(v[v(I)]: nonThrough,crossing) (lane[nonThrough]: (v(I) ; NQ)) 
+            (v[dv(J)]: through,yield) (lane[through]: TQ) 
+            (mode: (if isCongested(TQ) then fair else prioritized fi)) (crossing?: true) OCs} .
+  rl [enter-fairN-N] : 
+  {(v[v(I)]: nonThrough,VS) (lane[nonThrough]: (v(I) ; NQ)) (mode: fair) (turn: nonThrough) (crossing?: false) OCs}
+   => {(v[v(I)]: nonThrough,crossing) (lane[nonThrough]: (v(I) ; NQ)) (mode: fair) (turn: through) (crossing?: true) OCs} .
+***(
+  rl [enter-fairT-N] : 
+  {(v[v(I)]: nonThrough,stopped) (lane[nonThrough]: (v(I) ; NQ)) (lane[through]: empq) 
+    (mode: fair) (turn: through) (crossing?: false) OCs}
+   => {(v[v(I)]: nonThrough,crossing) (lane[nonThrough]: (v(I) ; NQ)) (lane[through]: empq) 
+            (mode: fair) (turn: through) (crossing?: true) OCs} .
+)***
+  --- exit
+  rl [exit-T] : 
+  {(v[v(I)]: through,crossing) (lane[through]: (v(I) ; TQ)) (crossing?: true) (#ucvs: s(N)) 
+    (mode: MD) OCs}
+   => {(v[v(I)]: through,crossed) (lane[through]: TQ) (crossing?: false) (#ucvs: N) 
+    (mode: (if isCongested(TQ) then fair else prioritized fi)) OCs} .
+  rl [exit-N] : 
+  {(v[v(I)]: nonThrough,crossing) (lane[nonThrough]: (v(I) ; NQ)) (crossing?: true) (#ucvs: s(N)) OCs}
+   => {(v[v(I)]: nonThrough,crossed) (lane[nonThrough]: NQ) (crossing?: false) (#ucvs: N) OCs} .
+  --- delete space
+  rl [del-S] : 
+  {(v[dv(I)]: through,space) (lane[through]: (dv(I) ; TQ)) 
+    (mode: MD) OCs}
+   => {(v[dv(I)]: through,yield) (lane[through]: TQ) 
+    (mode: (if isCongested(TQ) then fair else prioritized fi)) OCs} .
+endm
+
+***(
+The command counts the number of reachable states from init:
+search [1] in AVMP : init =>* {OCs}  such that false .
+The command checks if there exists a deadlock state:
+search [1] in AVMP : init =>! {OCs} .
+
+The command checks if the protocol enjoys the mutual exclusion property:
+search [1] in AVMP : init =>* {(v[v(I)]: L1,crossing) (v[v(J)]: L2,crossing) OCs}  .
+)***
+
+in model-checker .
+
+mod AVMP-PREDS is
+  pr AVMP .
+  inc SATISFACTION .
+  subsort Config < State .
+  ops fin : -> Prop .
+  var OCs : Soup{OComp} .
+  var PROP : Prop .
+  var Q1 : Queue{Vid} .
+  var I : Nat .
+  op char1 : Nat -> Prop .
+  op char2 : Nat -> Prop .
+  op veInNonTL : Vid  -> Prop .
+  eq {(gstat: fin) OCs} |= fin = true .
+  eq {OCs} |= PROP = false [owise] .
+  eq {(lane[through]: empq) (crossing?: false) 
+  (lane[nonThrough]: Q1) (v[v(I)]: nonThrough, approaching) OCs} |= char1(I) = topQ(Q1) == v(I) .
+  eq {
+  (lane[nonThrough]: Q1) (v[v(I)]: nonThrough, stopped) OCs} |= char2(I) = topQ(Q1) == v(I) .
+endm
+
+mod AVMP-CHECK is
+  inc AVMP-PREDS .
+  inc MODEL-CHECKER .
+  inc LTL-SIMPLIFIER .
+  op halt  : -> Formula .
+  eq halt = <> fin .
+  op char3 : -> Formula .
+
+  eq char3 = char1(4) |-> char2(4) .
+endm
+
+***(
+The command checks if all vehicles will eventually cross the merge point:
+red in AVMP-CHECK : modelCheck(init,halt) .
+  red in AVMP-CHECK : modelCheck(init,char3) .
+)***
+
+*** search [1] in AVMP : init =>* {(turn: nonThrough) (mode: fair) (lane[nonThrough]: Qu1:Queue{Vid}) (lane[through]: Qu:Queue{Vid}) (v[X:Vid]: L1:Lane,L:VStat) OCs:Soup{OComp}} such that Qu1:Queue{Vid} == empq and Qu:Queue{Vid} =/= empq and topQ(Qu:Queue{Vid}) == X:Vid and L:VStat =/= stopped and L:VStat =/= approaching and L:VStat =/= crossing .
+*** good
+*** search [1] in AVMP : init =>* {(v[X:Vid]: nonThrough, stopped) (crossing?: true) (lane[through]: empq) OCs:Soup{OComp}} .
+*** search [1] in AVMP : init =>* {(mode: fair) (turn: nonThrough) (v[Y:Vid]: through, l2:VStat) (v[X:Vid]: nonThrough, stopped) (lane[through]: Qu:Queue{Vid}) OCs:Soup{OComp}} such that l2:VStat =/= crossing and l2:VStat =/= crossed .
+*** search [1] in AVMP : init =>* {(v[Y:Vid]: l1:Lane, l2:VStat) (v[X:Vid]: nonThrough, stopped) (crossing?: true) (lane[through]: Qu:Queue{Vid}) OCs:Soup{OComp}} such that Qu:Queue{Vid} =/= empq and topQ(Qu:Queue{Vid}) == Y:Vid and l2:VStat =/= crossing .
+*** search [1] in AVMP : init =>* {(turn: nonThrough) (mode: fair) (v[Y1:Vid]: through, l3:VStat) (v[Y:Vid]: through, l2:VStat) (v[X:Vid]: nonThrough, stopped) (crossing?: true) (lane[through]: Qu:Queue{Vid}) OCs:Soup{OComp}} such that Qu:Queue{Vid} =/= empq and topQ(Qu:Queue{Vid}) == Y:Vid and (l2:VStat == stopped or l2:VStat == approaching) and l2:VStat =/= crossing.
+
+*** search [1] in AVMP : init =>* {(v[X:Vid]: l1:Lane, stopped) (v[Y:Vid]: l1:Lane, stopped) OCs:Soup{OComp}} .
+*** search [1] in AVMP : init =>* {(v[X:Vid]: through, stopped) (v[Y:Vid]: nonThrough, stopped) OCs:Soup{OComp}} .
